@@ -73,7 +73,7 @@ public final class RandomTool {
         break;
       case "bytes":
 		    value = getByteRandom(valueLength);
-		break;
+		    break;
       case "timestamp":
       case "longTimestamp":
       case "stringTimestamp":
