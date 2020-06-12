@@ -1,36 +1,20 @@
 package net.coru.kloadgen.input;
 
-import static io.confluent.kafka.schemaregistry.client.SchemaRegistryClientConfig.BASIC_AUTH_CREDENTIALS_SOURCE;
-import static io.confluent.kafka.schemaregistry.client.SchemaRegistryClientConfig.BEARER_AUTH_CREDENTIALS_SOURCE;
-import static io.confluent.kafka.schemaregistry.client.SchemaRegistryClientConfig.BEARER_AUTH_TOKEN_CONFIG;
-import static io.confluent.kafka.schemaregistry.client.SchemaRegistryClientConfig.USER_INFO_CONFIG;
-import static io.confluent.kafka.serializers.AbstractKafkaAvroSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG;
-import static net.coru.kloadgen.util.ProducerKeysHelper.FLAG_YES;
-import static net.coru.kloadgen.util.SchemaRegistryKeyHelper.SCHEMA_REGISTRY_AUTH_BASIC_TYPE;
-import static net.coru.kloadgen.util.SchemaRegistryKeyHelper.SCHEMA_REGISTRY_AUTH_FLAG;
-import static net.coru.kloadgen.util.SchemaRegistryKeyHelper.SCHEMA_REGISTRY_AUTH_KEY;
-import static net.coru.kloadgen.util.SchemaRegistryKeyHelper.SCHEMA_REGISTRY_URL;
 import static org.apache.avro.Schema.Type.ARRAY;
 import static org.apache.avro.Schema.Type.MAP;
 import static org.apache.avro.Schema.Type.RECORD;
 import static org.apache.avro.Schema.Type.UNION;
-import org.apache.avro.Schema.Type;
 
-import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
-import io.confluent.kafka.schemaregistry.client.SchemaMetadata;
-import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
 import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
 import java.io.IOException;
+import org.apache.avro.Schema.Type;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.EnumSet;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.Objects;
-import java.util.Properties;
 import lombok.SneakyThrows;
 import net.coru.kloadgen.exception.KLoadGenException;
 import net.coru.kloadgen.model.FieldValueMapping;
@@ -42,15 +26,10 @@ import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.commons.lang3.RandomUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.jmeter.threads.JMeterContextService;
 
 public class AvroSchemaProcessor implements Iterator<EnrichedRecord> {
 
-  private final SchemaRegistryClient schemaRegistryClient;
-
   private final Schema schema;
-
-  private SchemaMetadata metadata;
 
   private final List<FieldValueMapping> fieldExprMappings;
 
@@ -59,31 +38,10 @@ public class AvroSchemaProcessor implements Iterator<EnrichedRecord> {
   private final Set<Type> typesSet = EnumSet.of(Type.INT, Type.DOUBLE, Type.FLOAT, Type.BOOLEAN, Type.STRING,
       Type.LONG, Type.BYTES, Type.FIXED);
 
-  public AvroSchemaProcessor(String avroSchemaName, List<FieldValueMapping> fieldExprMappings)
-      throws IOException, RestClientException, KLoadGenException {
-    Map<String, String> originals = new HashMap<>();
-    Properties ctxProperties = JMeterContextService.getContext().getProperties();
+  public AvroSchemaProcessor(String avroSchemaName, List<FieldValueMapping> fieldExprMappings, SchemaTool schemaTool)
+      throws KLoadGenException, IOException, RestClientException {
 
-    if (Objects.nonNull(ctxProperties.getProperty(SCHEMA_REGISTRY_URL))) {
-      originals.put(SCHEMA_REGISTRY_URL_CONFIG, ctxProperties.getProperty(SCHEMA_REGISTRY_URL));
-
-      if (FLAG_YES.equals(ctxProperties.getProperty(SCHEMA_REGISTRY_AUTH_FLAG))) {
-        if (SCHEMA_REGISTRY_AUTH_BASIC_TYPE
-            .equals(ctxProperties.getProperty(SCHEMA_REGISTRY_AUTH_KEY))) {
-          originals.put(BASIC_AUTH_CREDENTIALS_SOURCE,
-              ctxProperties.getProperty(BASIC_AUTH_CREDENTIALS_SOURCE));
-          originals.put(USER_INFO_CONFIG, ctxProperties.getProperty(USER_INFO_CONFIG));
-        } else {
-          originals.put(BEARER_AUTH_CREDENTIALS_SOURCE,
-              ctxProperties.getProperty(BEARER_AUTH_CREDENTIALS_SOURCE));
-          originals.put(BEARER_AUTH_TOKEN_CONFIG, ctxProperties.getProperty(BEARER_AUTH_TOKEN_CONFIG));
-        }
-      }
-      schemaRegistryClient = new CachedSchemaRegistryClient(originals.get(SCHEMA_REGISTRY_URL_CONFIG), 1000, originals);
-    } else {
-      throw new KLoadGenException("No Schema Registry URL in System");
-    }
-    schema = getSchemaBySubject(avroSchemaName);
+    schema = schemaTool.getSchemaBySubject(avroSchemaName, fieldExprMappings);
     randomToolAvro = new AvroRandomTool();
     this.fieldExprMappings = fieldExprMappings;
   }
@@ -260,11 +218,6 @@ public class AvroSchemaProcessor implements Iterator<EnrichedRecord> {
     int endOfField = pathToClean.contains("[")?
         pathToClean.indexOf("[") : 0;
     return pathToClean.substring(0, endOfField).replaceAll("\\[[0-9]*]", "");
-  }
-
-  private Schema getSchemaBySubject(String avroSubjectName) throws IOException, RestClientException {
-    metadata = schemaRegistryClient.getLatestSchemaMetadata(avroSubjectName);
-    return schemaRegistryClient.getById(metadata.getId());
   }
 
   @Override

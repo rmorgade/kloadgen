@@ -46,9 +46,7 @@ import org.apache.commons.lang3.RandomUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.jmeter.threads.JMeterContextService;
 
-public class AvroFileProcessor implements Iterator<EnrichedRecord> {
-
-  private final Schema schema;
+public class SchemaCreatorTool implements SchemaTool {
 
   private SchemaMetadata metadata;
 
@@ -59,11 +57,14 @@ public class AvroFileProcessor implements Iterator<EnrichedRecord> {
   private final Set<Type> typesSet = EnumSet.of(Type.INT, Type.DOUBLE, Type.FLOAT, Type.BOOLEAN, Type.STRING,
       Type.LONG, Type.BYTES, Type.FIXED);
 
-  public AvroFileProcessor(String avroSchemaName, List<FieldValueMapping> fieldExprMappings) throws KLoadGenException {
+  public SchemaCreatorTool(String avroSchemaName, List<FieldValueMapping> fieldExprMappings) throws KLoadGenException {
 
     randomToolAvro = new AvroRandomTool();
     this.fieldExprMappings = fieldExprMappings;
-    this.schema = buildSchemaFromProperties(avroSchemaName, fieldExprMappings);
+  }
+
+  public Schema getSchemaBySubject(String avroSubjectName, List<FieldValueMapping> fieldExprMappings) throws IOException, RestClientException {
+    return buildSchemaFromProperties(avroSubjectName, fieldExprMappings);
   }
 
   private Schema buildSchemaFromProperties(String avroSchemaName, List<FieldValueMapping> fieldExprMappings) {
@@ -125,85 +126,6 @@ public class AvroFileProcessor implements Iterator<EnrichedRecord> {
     }
     return Schema.create(type);
   }
-  @SneakyThrows
-  @Override
-  public EnrichedRecord next() {
-    GenericRecord entity = new GenericData.Record(schema);
-    if (!fieldExprMappings.isEmpty()) {
-      ArrayDeque<FieldValueMapping> fieldExpMappingsQueue = new ArrayDeque<>(fieldExprMappings);
-      FieldValueMapping fieldValueMapping = fieldExpMappingsQueue.element();
-      while (!fieldExpMappingsQueue.isEmpty()) {
-        if (cleanUpPath(fieldValueMapping, "").contains("[")) {
-          String fieldName = getCleanMethodName(fieldValueMapping, "");
-          if(fieldValueMapping.getFieldType().contains("map")) {
-            entity.put(fieldName, createObjectMap(fieldValueMapping.getFieldType(),
-                calculateSize(fieldName),
-                fieldValueMapping.getFieldValuesList(),schema.getField(fieldValueMapping.getFieldName())));
-          }
-          entity.put(fieldName,
-              createObjectArray(entity.getSchema().getField(fieldName).schema().getElementType(), fieldName, calculateSize(fieldName),
-                  fieldExpMappingsQueue));
-          fieldValueMapping = getSafeGetElement(fieldExpMappingsQueue);
-        } else if (cleanUpPath(fieldValueMapping, "").contains(".")) {
-          String fieldName = getCleanMethodName(fieldValueMapping, "");
-          entity.put(fieldName, createObject(entity.getSchema().getField(fieldName).schema(), fieldName, fieldExpMappingsQueue));
-          fieldValueMapping = getSafeGetElement(fieldExpMappingsQueue);
-        } else {
-          entity.put(fieldValueMapping.getFieldName(),
-              randomToolAvro.generateRandom(fieldValueMapping.getFieldType(), fieldValueMapping.getValueLength(),
-                  fieldValueMapping.getFieldValuesList(),
-                  schema.getField(fieldValueMapping.getFieldName())));
-          fieldExpMappingsQueue.remove();
-          fieldValueMapping = fieldExpMappingsQueue.peek();
-        }
-      }
-    }
-    return new EnrichedRecord(metadata, entity);
-  }
-
-  private GenericRecord createObject(final Schema subSchema, final String fieldName, final ArrayDeque<FieldValueMapping> fieldExpMappingsQueue)
-      throws KLoadGenException {
-    Schema schema = subSchema;
-    GenericRecord subEntity = createRecord(schema);
-    if (null == subEntity) {
-      throw new KLoadGenException("Something Odd just happened");
-    } else {
-      schema = subEntity.getSchema();
-    }
-    FieldValueMapping fieldValueMapping = fieldExpMappingsQueue.element();
-    while(!fieldExpMappingsQueue.isEmpty() && fieldValueMapping.getFieldName().contains(fieldName)) {
-      String cleanFieldName = cleanUpPath(fieldValueMapping, fieldName);
-      if (cleanFieldName.matches("[\\w\\d]+\\[.*")) {
-        if (fieldValueMapping.getFieldType().contains("map")){
-          fieldExpMappingsQueue.poll();
-          String fieldNameSubEntity = getCleanMethodNameMap(fieldValueMapping, fieldName);
-          subEntity.put(fieldNameSubEntity, createObjectMap(fieldValueMapping.getFieldType(),
-              calculateSize(cleanFieldName),
-              fieldValueMapping.getFieldValuesList(),schema.getField(cleanFieldName)));
-        } else {
-          String fieldNameSubEntity = getCleanMethodName(fieldValueMapping, fieldName);
-          subEntity.put(fieldNameSubEntity, createObjectArray(extractRecordSchema(subEntity.getSchema().getField(fieldNameSubEntity)),
-              fieldNameSubEntity,
-              calculateSize(cleanFieldName),
-              fieldExpMappingsQueue));
-        }
-      }else if (cleanFieldName.contains(".")) {
-        String fieldNameSubEntity = getCleanMethodName(fieldValueMapping, fieldName);
-        subEntity.put(fieldNameSubEntity, createObject(subEntity.getSchema().getField(fieldNameSubEntity).schema(),
-            fieldNameSubEntity,
-            fieldExpMappingsQueue));
-      } else {
-        fieldExpMappingsQueue.poll();
-        subEntity.put(cleanFieldName, randomToolAvro.generateRandom(
-            fieldValueMapping.getFieldType(),
-            fieldValueMapping.getValueLength(),
-            fieldValueMapping.getFieldValuesList(),
-            schema.getField(cleanFieldName)));
-      }
-      fieldValueMapping = getSafeGetElement(fieldExpMappingsQueue);
-    }
-    return subEntity;
-  }
 
   private Schema extractRecordSchema(Field field) {
     if (ARRAY == field.schema().getType()) {
@@ -217,38 +139,6 @@ public class AvroFileProcessor implements Iterator<EnrichedRecord> {
     }else return null;
   }
 
-  private List<GenericRecord> createObjectArray(Schema subSchema, String fieldName, Integer arraySize, ArrayDeque<FieldValueMapping> fieldExpMappingsQueue)
-      throws KLoadGenException {
-    List<GenericRecord> objectArray = new ArrayList<>(arraySize);
-    for(int i=0; i<arraySize-1; i++) {
-      ArrayDeque<FieldValueMapping> temporalQueue = fieldExpMappingsQueue.clone();
-      objectArray.add(createObject(subSchema, fieldName, temporalQueue));
-    }
-    objectArray.add(createObject(subSchema, fieldName, fieldExpMappingsQueue));
-    return objectArray;
-  }
-
-  private Object createObjectMap(String fieldType, Integer arraySize, List<String> fieldExpMappings, Field field)
-      throws KLoadGenException {
-    return randomToolAvro.generateRandomMap(fieldType, arraySize, fieldExpMappings, field, arraySize);
-  }
-
-  private GenericRecord createRecord(Schema schema) {
-    if (RECORD == schema.getType()) {
-      return new GenericData.Record(schema);
-    } else if (UNION == schema.getType()) {
-      return createRecord(getRecordUnion(schema.getTypes()));
-    } else if (ARRAY == schema.getType()) {
-      return createRecord(schema.getElementType());
-    } else if (MAP == schema.getType()) {
-      return createRecord(schema.getElementType());
-    } else if (typesSet.contains(schema.getType())) {
-      return createRecord(schema.getElementType());
-    } else{
-      return null;
-    }
-  }
-
   private Schema getRecordUnion(List<Schema> types) {
     Schema isRecord = null;
     for (Schema schema : types) {
@@ -257,15 +147,6 @@ public class AvroFileProcessor implements Iterator<EnrichedRecord> {
       }
     }
     return isRecord;
-  }
-
-  private Integer calculateSize(String fieldName) {
-    int arrayLength = RandomUtils.nextInt(1, 10);
-    String arrayLengthStr = StringUtils.substringBetween(fieldName, "[", "]");
-    if (StringUtils.isNotEmpty(arrayLengthStr) && StringUtils.isNumeric(arrayLengthStr)) {
-      arrayLength = Integer.parseInt(arrayLengthStr);
-    }
-    return arrayLength;
   }
 
   private FieldValueMapping getSafeGetElement(ArrayDeque<FieldValueMapping> fieldExpMappingsQueue) {
@@ -292,15 +173,4 @@ public class AvroFileProcessor implements Iterator<EnrichedRecord> {
     return pathToClean.substring(0, endOfField).replaceAll("\\[[0-9]*]", "");
   }
 
-  private String getCleanMethodNameMap(FieldValueMapping fieldValueMapping, String fieldName) {
-    String pathToClean = cleanUpPath(fieldValueMapping, fieldName);
-    int endOfField = pathToClean.contains("[")?
-        pathToClean.indexOf("[") : 0;
-    return pathToClean.substring(0, endOfField).replaceAll("\\[[0-9]*]", "");
-  }
-
-  @Override
-  public boolean hasNext() {
-    return true;
-  }
 }
