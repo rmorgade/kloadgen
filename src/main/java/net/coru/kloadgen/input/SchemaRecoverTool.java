@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 import net.coru.kloadgen.model.FieldValueMapping;
 import org.apache.avro.Schema;
-
+import org.apache.commons.lang3.tuple.Pair;
 
 public class SchemaRecoverTool implements SchemaTool {
 
@@ -23,8 +23,8 @@ public class SchemaRecoverTool implements SchemaTool {
   }
 
   @Override
-  public Schema getSchemaBySubject(String avroSubjectName, List<FieldValueMapping> fieldExprMappings) throws IOException, RestClientException {
+  public Pair<SchemaMetadata, Schema> getSchemaBySubject(String avroSubjectName, List<FieldValueMapping> fieldExprMappings) throws IOException, RestClientException {
     SchemaMetadata metadata = schemaRegistryClient.getLatestSchemaMetadata(avroSubjectName);
-    return schemaRegistryClient.getById(metadata.getId());
+    return Pair.of(metadata, schemaRegistryClient.getById(metadata.getId()));
   }
 }

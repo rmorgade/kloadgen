@@ -26,10 +26,13 @@ import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.commons.lang3.RandomUtils;
 import org.apache.commons.lang3.StringUtils;
+import io.confluent.kafka.schemaregistry.client.SchemaMetadata;
+import org.apache.commons.lang3.tuple.Pair;
 
 public class AvroSchemaProcessor implements Iterator<EnrichedRecord> {
 
   private final Schema schema;
+   private final SchemaMetadata metadata;
 
   private final List<FieldValueMapping> fieldExprMappings;
 
@@ -40,8 +43,9 @@ public class AvroSchemaProcessor implements Iterator<EnrichedRecord> {
 
   public AvroSchemaProcessor(String avroSchemaName, List<FieldValueMapping> fieldExprMappings, SchemaTool schemaTool)
       throws KLoadGenException, IOException, RestClientException {
-
-    schema = schemaTool.getSchemaBySubject(avroSchemaName, fieldExprMappings);
+    Pair<SchemaMetadata, Schema> schemaPair = schemaTool.getSchemaBySubject(avroSchemaName, fieldExprMappings);
+    schema = schemaPair.getValue();
+    metadata = schemaPair.getKey();
     randomToolAvro = new AvroRandomTool();
     this.fieldExprMappings = fieldExprMappings;
   }
